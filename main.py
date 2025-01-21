@@ -39,7 +39,7 @@ class DQN(nn.Module):
         
         super(DQN,self).__init__()
         input_features = env.observation().shape[0]
-        action_space = env.continuous_action_space.shape[0]
+        action_space = len([-1, 0, -1])
         
         '''
         ToDo: 
@@ -75,7 +75,7 @@ class DQN(nn.Module):
         x = torch.tanh(self.dense1(x))
         x = torch.tanh(self.dense2(x))
         x = torch.tanh(self.dense3(x))
-        x = torch.tanh(self.dense4(x))
+        x = self.dense4(x)
         
         return x
     
@@ -109,7 +109,7 @@ class ExperienceReplay:
             '''
             
         #Solution:
-            action = env.continuous_action_space.sample()
+            action = np.random.uniform(-1, 1)
             new_obs, reward, done = env.step(action)
 
             transition = (obs, action, reward, done, new_obs)
@@ -117,7 +117,7 @@ class ExperienceReplay:
             obs = new_obs
     
             if done:
-                obs = env.reset(seed=seed)
+                obs = env.reset()
         
         print('Initialization with random transitions is done!')
       
@@ -214,14 +214,12 @@ class vanilla_DQNAgent:
     
         if (random_sample <= epsilon) and not greedy:
             #Random action
-            action = self.env.continuous_action_space.sample()
+            action = np.random.uniform(-1, 1)
         
         else:
             #Greedy action
             obs_t = torch.as_tensor(observation, dtype = torch.float32, device=self.device)
-            q_values = self.online_network(obs_t.unsqueeze(0))
-            print("q-values : ", q_values)
-        
+            q_values = self.online_network(obs_t.unsqueeze(0))        
             max_q_index = torch.argmax(q_values, dim = 1)[0]
             action = max_q_index.detach().item()
         
@@ -237,10 +235,6 @@ class vanilla_DQNAgent:
 
         q_values = self.online_network(observations_t)
 
-        # Ensure actions_t has correct shape (batch_size, 1)
-        if actions_t.dim() == 1:
-            actions_t = actions_t.unsqueeze(-1)
-
         action_q_values = torch.gather(q_values, dim=1, index=actions_t)
 
         loss = F.smooth_l1_loss(action_q_values, targets.detach())
@@ -255,7 +249,7 @@ class vanilla_DQNAgent:
 #Discount rate
 discount_rate = 0.99
 #That is the sample that we consider to update our algorithm
-batch_size = 1
+batch_size = 3
 #Maximum number of transitions that we store in the buffer
 buffer_size = 50000
 #Minimum number of random transitions stored in the replay buffer
@@ -267,7 +261,7 @@ epsilon_end = 0.05
 #Decay period until epsilon start -> epsilon end
 epsilon_decay = 10000
 
-max_episodes = 250000
+max_episodes = 300000
 
 #Learning_rate
 lr = 5e-4
@@ -323,13 +317,13 @@ def training_loop(path_to_dataset, agent, max_episodes, target_ = False, seed=42
         if (step+1) % 100 == 0:
             average_reward_list.append(np.mean(agent.replay_memory.reward_buffer))
         
-        # #Update target network, do not bother about it now!
-        # if target_:
+        #Update target network, do not bother about it now!
+        if target_:
             
-        #     #Set the target_update_frequency
-        #     target_update_frequency = 250
-        #     if step % target_update_frequency == 0:
-        #         dagent.update_target_network()
+            #Set the target_update_frequency
+            target_update_frequency = 300
+            if step % target_update_frequency == 0:
+                dagent.update_target_network()
 
     
         #Print some output
@@ -345,3 +339,170 @@ def training_loop(path_to_dataset, agent, max_episodes, target_ = False, seed=42
 
 average_rewards_vanilla_dqn = training_loop(path_to_dataset, vanilla_agent, max_episodes)
 
+class DDQNAgent:
+    
+    def __init__(self, path_to_data, device, epsilon_decay, 
+                 epsilon_start, epsilon_end, discount_rate, lr, buffer_size, seed = 123):
+        '''
+        Params:
+        env = name of the environment that the agent needs to play
+        device = set up to run CUDA operations
+        epsilon_decay = Decay period until epsilon start -> epsilon end
+        epsilon_start = starting value for the epsilon value
+        epsilon_end = ending value for the epsilon value
+        discount_rate = discount rate for future rewards
+        lr = learning rate
+        buffer_size = max number of transitions that the experience replay buffer can store
+        seed = seed for random number generator for reproducibility
+        '''
+        self.env = DataCenterEnv(path_to_data)
+        self.device = device
+        self.epsilon_decay = epsilon_decay
+        self.epsilon_start = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.discount_rate = discount_rate
+        self.learning_rate = lr
+        self.buffer_size = buffer_size
+        
+        self.replay_memory = ExperienceReplay(self.env, self.buffer_size, seed = seed)
+        self.online_network = DQN(self.env, self.learning_rate).to(self.device)
+        
+        '''
+        ToDo: Add here a target network and set the parameter values to the ones of the online network!
+        Hint: Use the method 'load_state_dict'!
+        '''
+        
+        #Solution:
+        self.target_network = DQN(self.env, self.learning_rate).to(self.device)
+        self.target_network.load_state_dict(self.online_network.state_dict())
+        
+    def choose_action(self, step, observation, greedy = False):
+        
+        '''
+        Params:
+        step = the specific step number 
+        observation = observation input
+        greedy = boolean that
+        
+        Returns:
+        action: action chosen (either random or greedy)
+        epsilon: the epsilon value that was used 
+        '''
+        
+        epsilon = np.interp(step, [0, self.epsilon_decay], [self.epsilon_start, self.epsilon_end])
+    
+        random_sample = random.random()
+    
+        if (random_sample <= epsilon) and not greedy:
+            #Random action
+            action = np.random.uniform(-1, 1)
+        
+        else:
+            #Greedy action
+            obs_t = torch.as_tensor(observation, dtype = torch.float32, device=self.device)
+            q_values = self.online_network(obs_t.unsqueeze(0))
+        
+            max_q_index = torch.argmax(q_values, dim = 1)[0]
+            action = max_q_index.detach().item()
+        
+        return action, epsilon
+    
+    
+    def return_q_value(self, observation):
+        '''
+        Params:
+        observation = input value of the state the agent is in
+        
+        Returns:
+        maximum q value 
+        '''
+        #We will need this function later for plotting the 3D graph
+        
+        obs_t = torch.as_tensor(observation, dtype = torch.float32, device=self.device)
+        q_values = self.online_network(obs_t.unsqueeze(0))
+        
+        return torch.max(q_values).item()
+        
+    def learn(self, batch_size):
+        
+        '''
+        Params:
+        batch_size = number of transitions that will be sampled
+        '''
+        
+        observations_t, actions_t, rewards_t, dones_t, new_observations_t = self.replay_memory.sample(batch_size)
+
+        #Compute targets, note that we use the same neural network to do both! This will be changed later!
+
+        target_q_values = self.target_network(new_observations_t)
+        max_target_q_values = target_q_values.max(dim=1, keepdim=True)[0]
+
+        targets = rewards_t + self.discount_rate * (1-dones_t) * max_target_q_values
+
+        #Compute loss
+
+        q_values = self.online_network(observations_t)
+
+        action_q_values = torch.gather(input=q_values, dim=1, index=actions_t)
+
+        #Loss, here we take the huber loss!
+
+        loss = F.smooth_l1_loss(action_q_values, targets)
+        
+        #Uncomment the following code to use the MSE loss instead!
+        #loss = F.mse_loss(action_q_values, targets)
+        
+        #Gradient descent to update the weights of the neural networ
+        self.online_network.optimizer.zero_grad()
+        loss.backward()
+        self.online_network.optimizer.step()
+        
+    def update_target_network(self):
+        
+        '''
+        ToDO: 
+        Complete the method which updates the target network with the parameters of the online network
+        Hint: use the load_state_dict method!
+        '''
+    
+        #Solution:
+        
+        self.target_network.load_state_dict(self.online_network.state_dict())
+    
+    '''
+    The following method will let the DQNAgent play the game after it has worked 
+    through the number of episodes for training
+    '''
+    def play_game(self, step=1, seed=123):
+        
+        '''
+        Params:
+        step = the number of the step within the epsilon decay that is used for the epsilon value of epsilon-greedy
+        seed = seed for random number generator for reproducibility
+        '''
+        #Get the optimized strategy:
+        done = False
+        #Reinitialize the game 
+        self.env = DataCenterEnv(path_to_dataset)
+        #Start the game
+        state = self.env.reset()
+        while not done:
+            #Pick the best action 
+            action = self.choose_action(step, state, True)[0]
+            next_state, rew, terminated = self.env.step(action)
+            done = terminated 
+            state = next_state
+
+
+dagent = DDQNAgent(path_to_dataset, device, epsilon_decay, epsilon_start, epsilon_end, discount_rate, lr, buffer_size)
+average_rewards_ddqn = training_loop(path_to_dataset, dagent, max_episodes, target_ = True) 
+
+plt.plot(1000*(np.arange(len(average_rewards_ddqn))+1),average_rewards_ddqn)
+plt.plot(1000*(np.arange(len(average_rewards_vanilla_dqn))+1),average_rewards_vanilla_dqn)
+# specifying horizontal line type
+plt.axhline(y = -110, color = 'r', linestyle = '-')
+plt.title('Average reward over the past 100 simulations')
+plt.xlabel('Number of simulations')
+plt.legend(['Double DQN', 'Vanilla DQN', 'Benchmark solving the game'])
+plt.ylabel('Average reward')
+plt.show()
