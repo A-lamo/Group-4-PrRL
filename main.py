@@ -82,7 +82,7 @@ class DQN(nn.Module):
 
 class ExperienceReplay:
     
-    def __init__(self, env, buffer_size, min_replay_size = 10, seed = 123):
+    def __init__(self, env, buffer_size, min_replay_size = 1000, seed = 123):
         
         '''
         Params:
@@ -249,7 +249,7 @@ class vanilla_DQNAgent:
 #Discount rate
 discount_rate = 0.99
 #That is the sample that we consider to update our algorithm
-batch_size = 3
+batch_size = 32
 #Maximum number of transitions that we store in the buffer
 buffer_size = 50000
 #Minimum number of random transitions stored in the replay buffer
@@ -259,7 +259,7 @@ epsilon_start = 1.0
 #End value (lowest value) of epsilon
 epsilon_end = 0.05
 #Decay period until epsilon start -> epsilon end
-epsilon_decay = 10000
+epsilon_decay = 100000
 
 max_episodes = 300000
 
