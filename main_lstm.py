@@ -24,7 +24,7 @@ np.random.seed(seed)
 random.seed(seed)
 
 class RNNQNetwork(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size, num_layers=2):
+    def __init__(self, input_size, hidden_size, output_size, num_layers=4):
         super(RNNQNetwork, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
@@ -34,8 +34,10 @@ class RNNQNetwork(nn.Module):
 
         # Fully connected output layer
         self.fc1 = nn.Linear(hidden_size, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, output_size)
+        self.fc2 = nn.Linear(128, 256)
+        self.fc3 = nn.Linear(256, 128)
+        self.fc4 = nn.Linear(128, 64)
+        self.fc5 = nn.Linear(64, output_size)
 
 
     def forward(self, x):
@@ -51,12 +53,17 @@ class RNNQNetwork(nn.Module):
         out = self.fc2(out)
         out = F.relu(out)
         out = self.fc3(out)
+        out = F.relu(out)
+        out = self.fc4(out)
+        out = F.relu(out)
+        out = self.fc5(out)
+
 
         return out
 
 
 class ExperienceReplay:
-    def __init__(self, env, buffer_size, min_replay_size=1000, seed=123):
+    def __init__(self, env, buffer_size, min_replay_size=100, seed=123):
         self.env = env
         self.min_replay_size = min_replay_size
         self.replay_buffer = deque(maxlen=buffer_size)
@@ -70,8 +77,8 @@ class ExperienceReplay:
             if 0 < obs[2] < 7:
                 action = 1
             else:
-                action = np.random.choice([0, 1, 2])  # Fix action sampling
-            new_obs, reward, done = env.step(action)  # Fix step output
+                action = np.random.choice([-1, 1]) 
+            new_obs, reward, done = env.step(action)  
 
             transition = (obs, action, reward, done, new_obs)
             self.replay_buffer.append(transition)
@@ -128,14 +135,14 @@ class vanilla_DQNAgent:
         self.buffer_size = buffer_size
 
         self.replay_memory = ExperienceReplay(self.env, self.buffer_size, seed=seed)
-        self.online_network = RNNQNetwork(4, 64, 3, num_layers=2).to(self.device)
+        self.online_network = RNNQNetwork(4, 64, 2, num_layers=4).to(self.device)
         self.optimizer = optim.Adam(self.online_network.parameters(), self.learning_rate)  # Define optimizer
 
 
     def choose_action(self, step, observation, greedy=False):
         epsilon = np.interp(step, [0, self.epsilon_decay], [self.epsilon_start, self.epsilon_end])
         if random.random() <= epsilon and not greedy:
-            return np.random.choice([0, 1, 2]), epsilon
+            return np.random.choice([-1, 1]), epsilon
 
         obs_t = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
         obs_t = obs_t.unsqueeze(0).unsqueeze(0)  # Fix shape for LSTM
@@ -155,7 +162,8 @@ class vanilla_DQNAgent:
 
         observations_t = observations_t.unsqueeze(1)  # Ensure correct shape for LSTM
         q_values = self.online_network(observations_t)
-
+        
+        actions_t = (actions_t + 1) // 2  # Convert [-1, 1] to [0, 1] for indexing
         action_q_values = torch.gather(q_values, dim=1, index=actions_t)
 
         loss = F.smooth_l1_loss(action_q_values, targets.detach())
@@ -184,9 +192,7 @@ def training_loop(path_to_dataset, agent, max_episodes, target_ = False, seed=42
     episode_reward = 0.0
     
     for step in range(max_episodes):
-        
         action, epsilon = agent.choose_action(step, obs)
-       
         new_obs, reward, terminated = env.step(action)
         done = terminated         
         transition = (obs, action, reward, done, new_obs)
@@ -214,7 +220,7 @@ def training_loop(path_to_dataset, agent, max_episodes, target_ = False, seed=42
         if target_:
             
             #Set the target_update_frequency
-            target_update_frequency = 300
+            target_update_frequency = 100
             if step % target_update_frequency == 0:
                 dagent.update_target_network()
 
@@ -260,7 +266,7 @@ class DDQNAgent:
         self.buffer_size = buffer_size
         
         self.replay_memory = ExperienceReplay(self.env, self.buffer_size, seed = seed)
-        self.online_network = RNNQNetwork(4, 64, 3, num_layers=2).to(self.device)
+        self.online_network = RNNQNetwork(4, 64, 2, num_layers=4).to(self.device)
         self.optimizer = optim.Adam(self.online_network.parameters(), self.learning_rate)  # Define optimizer
 
         
@@ -270,13 +276,13 @@ class DDQNAgent:
         '''
         
         #Solution:
-        self.target_network = RNNQNetwork(4, 64, 3, num_layers=2).to(self.device)
+        self.target_network = RNNQNetwork(4, 64, 2, num_layers=4).to(self.device)
         self.target_network.load_state_dict(self.online_network.state_dict())
         
     def choose_action(self, step, observation, greedy=False):
         epsilon = np.interp(step, [0, self.epsilon_decay], [self.epsilon_start, self.epsilon_end])
         if random.random() <= epsilon and not greedy:
-            return np.random.choice([0, 1, 2]), epsilon
+            return np.random.choice([-1, 1]), epsilon
 
         obs_t = torch.as_tensor(observation, dtype=torch.float32, device=self.device)
         obs_t = obs_t.unsqueeze(0).unsqueeze(0)  # Fix shape for LSTM
@@ -298,9 +304,11 @@ class DDQNAgent:
         observations_t = observations_t.unsqueeze(1)  # Ensure correct shape for LSTM
         q_values = self.online_network(observations_t)
 
+        actions_t = (actions_t + 1) // 2  # Convert [-1, 1] to [0, 1] for indexing
         action_q_values = torch.gather(q_values, dim=1, index=actions_t)
 
-        loss = F.smooth_l1_loss(action_q_values, targets.detach())
+        # loss = F.smooth_l1_loss(action_q_values, targets.detach())
+        loss = F.mse_loss(action_q_values, targets.detach())
 
         self.optimizer.zero_grad()  # Use the optimizer defined in the agent
         loss.backward()
@@ -321,9 +329,9 @@ class DDQNAgent:
     
 
 #Discount rate
-discount_rate = 0.99
+discount_rate = 0.9
 #That is the sample that we consider to update our algorithm
-batch_size = 128
+batch_size = 64
 #Maximum number of transitions that we store in the buffer
 buffer_size = 50000
 #Minimum number of random transitions stored in the replay buffer
@@ -331,14 +339,14 @@ min_replay_size = 1000
 #Starting value of epsilon
 epsilon_start = 1.0
 #End value (lowest value) of epsilon
-epsilon_end = 0.05
+epsilon_end = 0.1
 #Decay period until epsilon start -> epsilon end
-epsilon_decay = 200000
+epsilon_decay = 30000
 
 max_episodes = 300000
 
 #Learning_rate
-lr = 5e-2
+lr = 5e-3
 #Path to the dataset
 path_to_dataset = "train.xlsx"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
