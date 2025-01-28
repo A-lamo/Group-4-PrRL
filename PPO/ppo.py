@@ -1,7 +1,7 @@
 from network import FeedForwardNN
 from env import DataCenterEnv
 import torch
-from torch.distributions import MultivariateNormal
+from torch.distributions import Categorical
 from torch.optim import Adam
 import torch.nn as nn
 import numpy as np
@@ -11,7 +11,7 @@ class PPO:
    def __init__(self, env):
       self.env = env
       self.obs_dim = env.observation().shape[0]
-      self.act_dim = env.continuous_action_space.shape[0]
+      self.act_dim = 3  # Discrete actions: 0, 1, -1
 
       # Set device (GPU if available, else CPU)
       self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -24,15 +24,11 @@ class PPO:
       self.actor_optim = Adam(self.actor.parameters(), lr=self.lr)
       self.critic_optim = Adam(self.critic.parameters(), lr=self.lr)
 
-      # Initialize covariance matrix and move it to the device
-      self.cov_var = torch.full(size=(self.act_dim,), fill_value=0.5, device=self.device)
-      self.cov_mat = torch.diag(self.cov_var)
-
    def _init_hyperparams(self):
       self.timesteps_per_batch = 1000
-      self.max_timesteps_per_episode = 48
+      self.max_timesteps_per_episode = 100
       self.discount_factor = 0.9
-      self.num_updates_per_iteration = 3
+      self.num_updates_per_iteration = 5
       self.lr = 5e-3
       self.clip = 0.2
 
@@ -40,6 +36,8 @@ class PPO:
       t_so_far = 0
 
       while t_so_far < total_timesteps:
+         if t_so_far % 100 == 0:
+            print("Step t : ", t_so_far)
          batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lengths = self.rollout()
          t_so_far += np.sum(batch_lengths)
          V, _ = self.evaluate(batch_obs, batch_acts)
@@ -70,8 +68,8 @@ class PPO:
 
    def policy(self, obs):
       obs = torch.tensor(obs, dtype=torch.float, device=self.device)  # Move observation to device
-      mean = self.actor(obs)
-      dist = MultivariateNormal(mean, self.cov_mat)
+      logits = self.actor(obs)
+      dist = Categorical(logits=logits)  # Using Categorical distribution for discrete actions
 
       action = dist.sample()
       log_prob = dist.log_prob(action)
@@ -93,8 +91,8 @@ class PPO:
    def evaluate(self, batch_obs, batch_acts):
       V = self.critic(batch_obs).squeeze()
       
-      mean = self.actor(batch_obs)
-      dist = MultivariateNormal(mean, self.cov_mat)
+      logits = self.actor(batch_obs)
+      dist = Categorical(logits=logits)
       log_probs = dist.log_prob(batch_acts)
 
       return V, log_probs
@@ -140,3 +138,22 @@ class PPO:
       batch_reward_to_gos = self.compute_rtgs(batch_rewards)
 
       return batch_obs, batch_acts, batch_log_probs, batch_reward_to_gos, batch_lengths
+
+
+   def evaluate_performance(self):
+      env = DataCenterEnv("../validate.xlsx")
+      aggregate_reward = 0
+      terminated = False
+      state = env.observation()
+      while not terminated:
+         # agent is your own imported agent class
+         action, _ = self.policy(state)
+         # next_state is given as: [storage_level, price, hour, day]
+         next_state, reward, terminated = env.step(action)
+         state = next_state
+         aggregate_reward += reward
+         # print("Action:", action)
+         # print("Next state:", next_state)
+         # print("Reward:", reward)
+
+      print('Total reward on the validation dataset:', aggregate_reward)
