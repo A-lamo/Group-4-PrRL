@@ -79,7 +79,7 @@ class PPO:
          discounted_reward = 0
 
          for reward in reversed(ep_rewards):
-            print("reward: ", reward)
+
             discounted_reward = reward + self.discount_factor * discounted_reward
             batch_rtgs.insert(0, discounted_reward)
          
@@ -129,9 +129,9 @@ class PPO:
          batch_lengths.append(ep_t + 1)
          batch_rewards.append(ep_rewards)
 
-      batch_obs = torch.tensor(batch_obs, dtype=torch.float)
-      batch_acts = torch.tensor(batch_acts, dtype= torch.float)
-      batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float)
+      batch_obs = torch.tensor(np.array(batch_obs), dtype=torch.float)
+      batch_acts = torch.tensor(np.array(batch_acts), dtype= torch.float)
+      batch_log_probs = torch.tensor(np.array(batch_log_probs), dtype=torch.float)
 
       batch_reward_to_gos = self.compute_rtgs(batch_rewards)
 
